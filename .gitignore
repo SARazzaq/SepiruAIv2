@@ -1,0 +1,33 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+
+# Virtual environments
+venv/
+env/
+.venv/
+
+# Secrets — NEVER commit these
+.env
+.streamlit/secrets.toml
+
+# ML training artifacts
+catboost_info/
+
+# Data files (keep only sample)
+*.csv
+!sample_data/*.csv
+*.xlsx
+*.xls
+
+# IDE
+.vscode/
+.idea/
+*.DS_Store
+Thumbs.db
+
+# Build
+*.egg-info/
+dist/
+build/
