@@ -15,11 +15,6 @@ import io
 import os
 from dotenv import load_dotenv
 
-import streamlit as st
-
-st.markdown("""
-<meta name="google-site-verification" content="x4ZOHCVDPoXQqdxmL3KNQJyhE19U7VGM6z7-l7sE9w0" />
-""", unsafe_allow_html=True)
 
 from src.ai_client     import AIClient
 from src.data_analyzer import DataAnalyzer
