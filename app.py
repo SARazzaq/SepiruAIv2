@@ -5,7 +5,6 @@ Run: streamlit run app.py
 import plotly.graph_objects as go
 from src.animations import aurora_background, show_lottie, apex_motion_engine
 from src.ui_components import load_all_styles, typing_indicator, render_section, render_insight, render_metric_cards, upload_cta, status_pill
-from src.auth import require_auth
 from src.quota_guard import can_proceed, get_usage, reset_time_utc
 from src.smart_context import extract_relevant_context
 import streamlit as st
@@ -52,8 +51,6 @@ st.set_page_config(
     layout="wide",
     initial_sidebar_state="expanded",
 )
-# ── Auth gate ────────────────────────────────────────────────────────────────
-require_auth()
 
 # ── Quota maintenance gate ────────────────────────────────────────────────────
 if not can_proceed():

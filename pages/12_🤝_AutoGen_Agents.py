@@ -1,16 +1,14 @@
 """
 AutoGen Multi-Agent Analysis — two AI agents collaborate on your data.
-Microsoft AutoGen, MIT license. 100% free & open-source.
+Requires: pip install pyautogen
 """
 import streamlit as st
 import pandas as pd
 from src.ui_components import load_all_styles
-from src.auth import require_auth
 from src.ai_client import AIClient
 from src.smart_context import extract_relevant_context
 
 load_all_styles("assets")
-require_auth()
 
 st.markdown("""
 <div class='app-header'>
@@ -18,50 +16,53 @@ st.markdown("""
     <p>DataAnalyst + Critic agents collaborate to answer your questions</p>
 </div>""", unsafe_allow_html=True)
 
+# ── Dependency check ───────────────────────────────────────────────────────────
+try:
+    import autogen
+    st.caption(f"AutoGen {autogen.__version__} ready")
+    _autogen_available = True
+except ImportError:
+    _autogen_available = False
+
+if not _autogen_available:
+    st.warning("⚠️ AutoGen is not installed in this environment.")
+    st.markdown("""
+**Run it locally:**
+```bash
+pip install pyautogen
+streamlit run app.py
+```
+AutoGen needs to call an LLM API multiple times per conversation, so it works best with Groq (free) or Ollama (local).
+    """)
+    st.stop()
+
 if st.session_state.get("df") is None:
     st.warning("Upload a file on the main page first.")
     st.stop()
 
 df = st.session_state.clean_df
 
-try:
-    import autogen
-    st.caption(f"AutoGen {autogen.__version__} ready")
-except ImportError:
-    st.error("AutoGen not installed.")
-    st.code("pip install pyautogen")
-    st.stop()
-
-# ── Question input ─────────────────────────────────────────────────────────────
 st.subheader("💬 Pose a question to the agent team")
 
 suggested = [
     f"What are the key drivers of {df.columns[-1]} in this dataset?",
     "Identify the top 3 insights and any anomalies in this data.",
     "What business recommendations can you make from this data?",
-    f"Is there a strong correlation between {df.columns[0]} and {df.columns[-1]}?",
 ]
 
-col1, col2 = st.columns([3, 1])
-with col1:
-    question = st.text_area("Your question", suggested[0], height=80)
-with col2:
-    st.markdown("**Quick picks:**")
-    for s in suggested[1:]:
-        if st.button(s[:45] + "…", key=s):
-            question = s
+question = st.text_area("Your question", suggested[0], height=80)
+for s in suggested[1:]:
+    if st.button(s[:60] + "…", key=s):
+        question = s
 
 max_rounds = st.slider("Max agent rounds", 2, 6, 3)
 
 if st.button("🚀 Start Multi-Agent Analysis", type="primary"):
     ai = AIClient()
-
     with st.spinner("Extracting data context…"):
         context = extract_relevant_context(df, question)
 
-    st.info(f"Context extracted: {len(context)} chars → sending to agents")
-
-    with st.spinner("Agents collaborating… (this may take 30-60s)"):
+    with st.spinner("Agents collaborating… (30–60s)"):
         try:
             from src.autogen_agents import run_autogen_analysis
             result = run_autogen_analysis(context, question, ai, max_rounds=max_rounds)
@@ -73,8 +74,6 @@ if st.button("🚀 Start Multi-Agent Analysis", type="primary"):
             st.stop()
 
     st.subheader("🧠 Agent Conversation")
-
-    # Parse and display each agent's turn
     for block in result.split("\n\n"):
         if block.strip():
             if block.startswith("[DataAnalyst]"):
@@ -86,23 +85,10 @@ if st.button("🚀 Start Multi-Agent Analysis", type="primary"):
             else:
                 st.markdown(block)
 
-    # Extract final answer
     if "FINAL_ANSWER:" in result:
         final = result.split("FINAL_ANSWER:")[-1].strip()
         st.success(f"✅ **Final Answer:** {final}")
 
 with st.sidebar:
-    st.markdown("### 🤖 Agent Roles")
-    st.markdown("""
-**DataAnalyst**
-- Interprets data context
-- Identifies patterns & insights
-- Forms structured conclusions
-
-**Critic**
-- Reviews analyst's response
-- Checks accuracy & completeness
-- Approves or requests revisions
-    """)
-    st.markdown("### ⚙️ Provider support")
-    st.markdown("Works with: Groq · OpenAI · Ollama · vLLM")
+    st.markdown("### 🤖 Agents\n**DataAnalyst** — interprets data, finds patterns\n\n**Critic** — reviews accuracy, approves or corrects")
+    st.markdown("### Providers\nGroq · OpenAI · Ollama · vLLM")

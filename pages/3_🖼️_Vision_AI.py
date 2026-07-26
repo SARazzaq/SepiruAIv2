@@ -14,8 +14,6 @@ load_dotenv()
 from src.ui_components import load_all_styles
 load_all_styles("assets")
 
-from src.auth import require_auth
-require_auth()
 
 st.markdown("""
 <div class='app-header'>

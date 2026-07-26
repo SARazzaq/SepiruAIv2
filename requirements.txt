@@ -10,7 +10,7 @@ python-dotenv>=1.0.1
 openpyxl>=3.1.4
 xlsxwriter>=3.2.0
 
-# ── AI providers ──────────────────────────────────────────────────────────────
+# ── AI providers (all have free tiers) ───────────────────────────────────────
 google-genai>=1.0.0
 groq>=0.9.0
 openai>=1.0.0
@@ -24,32 +24,23 @@ lightgbm>=4.3.0
 # ── NL to SQL ─────────────────────────────────────────────────────────────────
 duckdb>=0.10.0
 
-# ── Animations ────────────────────────────────────────────────────────────────
+# ── Animations / UI ───────────────────────────────────────────────────────────
 streamlit-lottie>=0.0.5
 Pillow>=10.0.0
 
-# ── PyTorch (deep learning) ───────────────────────────────────────────────────
-# Install separately to pick the right CUDA version:
-#   CPU:  pip install torch --index-url https://download.pytorch.org/whl/cpu
-#   GPU:  pip install torch --index-url https://download.pytorch.org/whl/cu121
-torch>=2.2.0
-
-# ── LlamaIndex RAG ────────────────────────────────────────────────────────────
-llama-index>=0.10.0
-llama-index-embeddings-huggingface>=0.2.0
-llama-index-llms-openai-like>=0.1.0
-sentence-transformers>=2.7.0
-
-# ── LangFuse observability (open-source, MIT) ─────────────────────────────────
+# ── LangFuse (cloud free tier — no server needed) ────────────────────────────
 langfuse>=2.0.0
 
-# ── AutoGen multi-agent (Microsoft, MIT) ─────────────────────────────────────
-pyautogen>=0.2.0
-
-# ── DeepEval RAG evaluation (Apache 2.0) ─────────────────────────────────────
-deepeval>=0.21.0
-
-# ── vLLM note ────────────────────────────────────────────────────────────────
-# vLLM uses the OpenAI client above (openai>=1.0.0) — no separate package needed.
-# Install vLLM server separately on GPU machine:
-#   pip install vllm
+# ──────────────────────────────────────────────────────────────────────────────
+# The packages below are intentionally excluded from Streamlit Cloud because
+# they are too large (PyTorch ~2GB, sentence-transformers, deepeval) or require
+# a local server (vLLM, Ollama). Those pages show a friendly "run locally"
+# message when the package is absent.
+#
+# To use locally, install what you need:
+#   pip install torch --index-url https://download.pytorch.org/whl/cpu
+#   pip install llama-index llama-index-embeddings-huggingface sentence-transformers
+#   pip install pyautogen
+#   pip install deepeval
+#   pip install vllm          # GPU server only
+# ──────────────────────────────────────────────────────────────────────────────

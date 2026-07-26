@@ -11,8 +11,6 @@ from src.quota_guard import can_proceed, get_usage, reset_time_utc
 
 load_all_styles("assets")
 
-from src.auth import require_auth
-require_auth()
 
 from src.ai_client import AIClient
 
