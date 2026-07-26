@@ -157,6 +157,18 @@ def prepare_data(df: pd.DataFrame, target_col: str) -> Tuple:
     X = data.drop(columns=[target_col])
     y = data[target_col]
 
+    # Convert datetime columns to numeric (ordinal timestamp)
+    for col in X.columns:
+        if pd.api.types.is_datetime64_any_dtype(X[col]):
+            X[col] = X[col].astype(np.int64) // 10**9  # seconds since epoch
+
+    # Keep only object + numeric columns
+    keep_cols = [
+        c for c in X.columns
+        if X[c].dtype == object or pd.api.types.is_numeric_dtype(X[c])
+    ]
+    X = X[keep_cols]
+
     for col in X.select_dtypes(include="object").columns:
         le = LabelEncoder()
         X[col] = le.fit_transform(X[col].astype(str))
@@ -165,8 +177,14 @@ def prepare_data(df: pd.DataFrame, target_col: str) -> Tuple:
     if y.dtype == object:
         le_target = LabelEncoder()
         y = le_target.fit_transform(y.astype(str))
+    elif pd.api.types.is_datetime64_any_dtype(y):
+        y = y.astype(np.int64) // 10**9
 
     X = X.select_dtypes(include="number")
+
+    if X.empty:
+        raise ValueError("No usable feature columns found after preprocessing.")
+
     scaler = StandardScaler()
     X_scaled = scaler.fit_transform(X)
 

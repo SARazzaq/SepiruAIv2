@@ -413,3 +413,19 @@ code,.stCode {
 .js-plotly-plot .plotly { background:transparent !important; }
 [data-testid="stTooltipIcon"] { color:var(--text-dim) !important; }
 #MainMenu,footer,header { visibility:hidden; }
+
+/* ── Hide sidebar collapse/expand button on all pages ── */
+[data-testid="collapsedControl"],
+[data-testid="stSidebarCollapsedControl"],
+button[kind="header"],
+[aria-label="Close sidebar"],
+[aria-label="Open sidebar"],
+[aria-label="Collapse sidebar"] {
+    display:none !important;
+    visibility:hidden !important;
+    pointer-events:none !important;
+}
+section[data-testid="stSidebar"] {
+    transform:translateX(0) !important;
+    min-width:280px !important;
+}

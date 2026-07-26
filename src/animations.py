@@ -545,10 +545,18 @@ def apex_motion_engine() -> str:
 (function(){
     let doc;
     try{doc=window.parent.document;}catch(e){return;}
-    if(doc.__apexV3)return;
-    doc.__apexV3=true;
+
+    // Remove old cursor elements if they exist (page navigation re-init)
+    ['_CD','_CR','_SPB','_curtain'].forEach(id=>{
+        const old=doc.getElementById(id);
+        if(old)old.remove();
+    });
 
     const S=doc.createElement('style');
+    S.id='_apexStyles';
+    // Remove old style if exists
+    const oldS=doc.getElementById('_apexStyles');
+    if(oldS)oldS.remove();
     S.textContent=`
         *{cursor:none!important;}
         #_CD{
@@ -727,12 +735,482 @@ def apex_motion_engine() -> str:
         // Disabled — causes header rotation on mouse move
     }
 
-    function runAll(){addReveal();addTilt();addMagnetic();addCounters();addTabRipple();addChartStagger();addParallax();}
+    /* ══════════════════════════════════════
+       SCROLL-DRIVEN ANIMATIONS
+    ══════════════════════════════════════ */
+    function addScrollAnimations(){
+        if(doc.__scrollDone)return;
+        doc.__scrollDone=true;
+
+        /* Staggered reveal on scroll */
+        const sio=new IntersectionObserver((entries)=>{
+            entries.forEach((e,i)=>{
+                if(e.isIntersecting){
+                    const delay=e.target.dataset.delay||i*60;
+                    setTimeout(()=>{
+                        e.target.style.opacity='1';
+                        e.target.style.transform='translateY(0) scale(1)';
+                        e.target.style.filter='blur(0)';
+                    },parseInt(delay));
+                    sio.unobserve(e.target);
+                }
+            });
+        },{threshold:0.06,rootMargin:'0px 0px -40px 0px'});
+
+        /* Apply to all major content blocks */
+        const SCROLL_SELS=[
+            '.stMarkdown h2','.stMarkdown h3',
+            '[data-testid="stMetric"]',
+            '[data-testid="stDataFrame"]',
+            '.js-plotly-plot',
+            '[data-testid="stExpander"]',
+            '.metric-card','.glass-card','.insight-box',
+            '[data-testid="stDownloadButton"]',
+            '.stSuccess','.stInfo','.stWarning','.stError',
+        ];
+
+        function applyScrollReveal(){
+            SCROLL_SELS.forEach((sel,si)=>{
+                doc.querySelectorAll(sel).forEach((el,ei)=>{
+                    if(el._srev)return;
+                    el._srev=true;
+                    el.style.cssText+=`
+                        opacity:0;
+                        transform:translateY(24px) scale(.975);
+                        filter:blur(4px);
+                        transition:opacity .75s cubic-bezier(.22,1,.36,1),
+                                   transform .75s cubic-bezier(.22,1,.36,1),
+                                   filter .75s cubic-bezier(.22,1,.36,1);
+                    `;
+                    el.dataset.delay=String(ei*55);
+                    sio.observe(el);
+                });
+            });
+        }
+        applyScrollReveal();
+
+        /* Scroll-linked gold line on left edge */
+        if(!doc.getElementById('_sline')){
+            const line=doc.createElement('div');
+            line.id='_sline';
+            line.style.cssText=`
+                position:fixed;left:0;top:0;width:2px;height:0%;
+                background:linear-gradient(180deg,transparent,#c9a84c,#f5e080,#c9a84c,transparent);
+                z-index:2147483644;pointer-events:none;
+                transition:height .1s linear;
+                box-shadow:0 0 8px rgba(201,168,76,.6);
+            `;
+            doc.body.appendChild(line);
+
+            function updateLine(){
+                const el=doc.documentElement;
+                const pct=el.scrollTop/(el.scrollHeight-el.clientHeight)*100||0;
+                line.style.height=Math.min(pct,100)+'%';
+            }
+            doc.addEventListener('scroll',updateLine,{passive:true});
+            const me2=doc.querySelector('.main');
+            if(me2)me2.addEventListener('scroll',updateLine,{passive:true});
+        }
+
+        return applyScrollReveal;
+    }
+
+    function runAll(){
+        addReveal();addTilt();addMagnetic();
+        addCounters();addTabRipple();addChartStagger();
+        const reapply=addScrollAnimations();
+    }
     runAll();
-    new MutationObserver(()=>{clearTimeout(doc._apexT);doc._apexT=setTimeout(runAll,380);}).observe(doc.body,{childList:true,subtree:true});
+    new MutationObserver(()=>{
+        clearTimeout(doc._apexT);
+        doc._apexT=setTimeout(()=>{
+            addReveal();addTilt();addMagnetic();
+            addCounters();addTabRipple();addChartStagger();
+            addScrollAnimations();
+        },380);
+    }).observe(doc.body,{childList:true,subtree:true});
 })();
 </script></body></html>"""
 
 
 def apple_animations() -> str:
     return apex_motion_engine()
+
+
+def direct_motion_inject() -> str:
+    """
+    Returns HTML with <style> + <script> injected directly via st.markdown.
+    No iframe — works on Streamlit Cloud.
+    Includes: custom cursor, scroll reveals, scroll progress bar,
+              card tilt, magnetic buttons, number counters, tab ripple,
+              scroll-driven gold line, aurora canvas background.
+    """
+    return """
+<style>
+/* ── Custom cursor ── */
+* { cursor: none !important; }
+
+#_apex_dot {
+    position: fixed;
+    width: 7px; height: 7px;
+    background: #c9a84c;
+    border-radius: 50%;
+    pointer-events: none;
+    z-index: 2147483647;
+    transform: translate(-50%, -50%);
+    mix-blend-mode: screen;
+    transition: width .15s ease, height .15s ease;
+    will-change: left, top;
+}
+#_apex_ring {
+    position: fixed;
+    width: 34px; height: 34px;
+    border: 1.5px solid rgba(201,168,76,.45);
+    border-radius: 50%;
+    pointer-events: none;
+    z-index: 2147483646;
+    transform: translate(-50%, -50%);
+    will-change: left, top;
+    transition:
+        width .4s cubic-bezier(.34,1.56,.64,1),
+        height .4s cubic-bezier(.34,1.56,.64,1),
+        border-color .3s ease,
+        background .3s ease,
+        border-radius .3s ease;
+}
+#_apex_ring.hover {
+    width: 52px; height: 52px;
+    border-color: rgba(201,168,76,.85);
+    background: rgba(201,168,76,.05);
+}
+#_apex_ring.input {
+    width: 2px; height: 22px;
+    border-radius: 2px;
+    border-color: rgba(201,168,76,.9);
+    background: rgba(201,168,76,.2);
+}
+#_apex_ring.click {
+    width: 18px; height: 18px;
+    background: rgba(201,168,76,.22);
+    border-color: rgba(201,168,76,1);
+}
+
+/* ── Scroll progress bar (top) ── */
+#_apex_bar {
+    position: fixed; top: 0; left: 0;
+    height: 2px; width: 0%;
+    background: linear-gradient(90deg, #c9a84c, #f5e080, #e8c96a, #c9a84c);
+    background-size: 200% auto;
+    z-index: 2147483645;
+    pointer-events: none;
+    box-shadow: 0 0 10px rgba(201,168,76,.8), 0 0 3px rgba(201,168,76,1);
+    animation: _apexGS 2s linear infinite;
+    transition: width .08s linear;
+}
+@keyframes _apexGS {
+    0%   { background-position: 0% center; }
+    100% { background-position: 200% center; }
+}
+
+/* ── Scroll-driven left gold line ── */
+#_apex_vline {
+    position: fixed; left: 0; top: 0;
+    width: 2px; height: 0%;
+    background: linear-gradient(180deg,
+        transparent 0%, #c9a84c 20%,
+        #f5e080 50%, #c9a84c 80%, transparent 100%);
+    z-index: 2147483644;
+    pointer-events: none;
+    box-shadow: 0 0 8px rgba(201,168,76,.5);
+    transition: height .1s linear;
+}
+
+/* ── Scroll reveal ── */
+._apexRV {
+    opacity: 0 !important;
+    transform: translateY(28px) scale(.975) !important;
+    filter: blur(5px) !important;
+    transition:
+        opacity .8s cubic-bezier(.22,1,.36,1),
+        transform .8s cubic-bezier(.22,1,.36,1),
+        filter .8s cubic-bezier(.22,1,.36,1) !important;
+}
+._apexRV._apexVIS {
+    opacity: 1 !important;
+    transform: translateY(0) scale(1) !important;
+    filter: blur(0) !important;
+}
+
+/* ── Tab ripple ── */
+@keyframes _apexRpl { to { transform: scale(3); opacity: 0; } }
+
+/* ── Hover micro-interactions ── */
+.stButton > button:hover {
+    box-shadow: 0 8px 32px rgba(201,168,76,.28),
+                0 0 0 1px rgba(201,168,76,.35) !important;
+}
+[data-baseweb="tab"]:hover {
+    color: #c9a84c !important;
+    background: rgba(201,168,76,.04) !important;
+}
+[data-testid="stMetric"]:hover {
+    border-color: rgba(201,168,76,.4) !important;
+    box-shadow: 0 16px 50px rgba(0,0,0,.55),
+                0 0 40px rgba(201,168,76,.08) !important;
+    transform: translateY(-5px) !important;
+}
+.stDataFrame:hover {
+    box-shadow: 0 0 55px rgba(201,168,76,.07) !important;
+}
+.streamlit-expanderHeader:hover {
+    border-color: rgba(201,168,76,.3) !important;
+    color: #c9a84c !important;
+    background: rgba(201,168,76,.04) !important;
+    padding-left: 1.3rem !important;
+    transition: all .25s ease !important;
+}
+[data-testid="stChatMessage"]:hover {
+    border-color: rgba(201,168,76,.16) !important;
+    transform: translateX(4px) !important;
+    transition: all .25s ease !important;
+}
+[data-testid="stFileUploader"]:hover {
+    border-color: rgba(201,168,76,.5) !important;
+    box-shadow: 0 0 55px rgba(201,168,76,.09),
+                inset 0 0 55px rgba(201,168,76,.03) !important;
+}
+</style>
+
+<div id="_apex_dot"></div>
+<div id="_apex_ring"></div>
+<div id="_apex_bar"></div>
+<div id="_apex_vline"></div>
+
+<script>
+(function() {
+    if (window.__apexDirect) return;
+    window.__apexDirect = true;
+
+    const dot   = document.getElementById('_apex_dot');
+    const ring  = document.getElementById('_apex_ring');
+    const bar   = document.getElementById('_apex_bar');
+    const vline = document.getElementById('_apex_vline');
+
+    /* ── Cursor spring physics ── */
+    let mx=0, my=0, rx=0, ry=0, vx=0, vy=0;
+
+    document.addEventListener('mousemove', e => {
+        mx = e.clientX; my = e.clientY;
+        dot.style.left = mx + 'px';
+        dot.style.top  = my + 'px';
+    });
+
+    (function springLoop() {
+        const k=.12, d=.68;
+        vx = (vx + (mx - rx) * k) * d;
+        vy = (vy + (my - ry) * k) * d;
+        rx += vx; ry += vy;
+        ring.style.left = rx + 'px';
+        ring.style.top  = ry + 'px';
+        requestAnimationFrame(springLoop);
+    })();
+
+    document.addEventListener('mouseover', e => {
+        const t = e.target;
+        if (t.closest('input,textarea,select'))
+            ring.className = 'input';
+        else if (t.closest('button,[data-baseweb="tab"],.metric-card,[data-testid="stMetric"],.glass-card'))
+            ring.className = 'hover';
+        else
+            ring.className = '';
+    });
+
+    document.addEventListener('mousedown', () => ring.classList.add('click'));
+    document.addEventListener('mouseup',   () => ring.classList.remove('click'));
+
+    /* ── Scroll progress ── */
+    function updateScroll() {
+        const el  = document.documentElement;
+        const pct = el.scrollTop / (el.scrollHeight - el.clientHeight) * 100 || 0;
+        const p   = Math.min(pct, 100);
+        bar.style.width   = p + '%';
+        vline.style.height = p + '%';
+    }
+    document.addEventListener('scroll', updateScroll, { passive: true });
+
+    /* ── Scroll reveal ── */
+    const io = new IntersectionObserver((entries) => {
+        entries.forEach((e, i) => {
+            if (e.isIntersecting) {
+                setTimeout(() => e.target.classList.add('_apexVIS'), i * 55);
+                io.unobserve(e.target);
+            }
+        });
+    }, { threshold: 0.05, rootMargin: '0px 0px -30px 0px' });
+
+    const REVEAL_SELS = [
+        '[data-testid="stMetric"]',
+        '[data-testid="stDataFrame"]',
+        '.js-plotly-plot',
+        '[data-testid="stExpander"]',
+        '[data-testid="stDownloadButton"]',
+        '.stMarkdown h2', '.stMarkdown h3',
+        '.insight-box', '.metric-card', '.glass-card',
+        '.stSuccess', '.stInfo', '.stWarning', '.stError',
+    ];
+
+    function addReveal() {
+        REVEAL_SELS.forEach(sel => {
+            document.querySelectorAll(sel).forEach(el => {
+                if (!el._rv) {
+                    el._rv = true;
+                    el.classList.add('_apexRV');
+                    io.observe(el);
+                }
+            });
+        });
+    }
+
+    /* ── 3D card tilt ── */
+    function addTilt() {
+        document.querySelectorAll('.metric-card,[data-testid="stMetric"],.glass-card').forEach(card => {
+            if (card._tilt) return;
+            card._tilt = true;
+            let fid;
+            card.addEventListener('mousemove', e => {
+                cancelAnimationFrame(fid);
+                fid = requestAnimationFrame(() => {
+                    const r  = card.getBoundingClientRect();
+                    const cx = r.left + r.width  / 2;
+                    const cy = r.top  + r.height / 2;
+                    const tx = ((e.clientY - cy) / (r.height / 2)) * -9;
+                    const ty = ((e.clientX - cx) / (r.width  / 2)) *  9;
+                    const dist = Math.sqrt((e.clientX-cx)**2 + (e.clientY-cy)**2);
+                    const glow = Math.max(0, (1 - dist / (r.width * .6)) * .28);
+                    card.style.transform = `perspective(900px) rotateX(${tx}deg) rotateY(${ty}deg) scale(1.04) translateZ(6px)`;
+                    card.style.boxShadow = `${-ty*1.4}px ${tx*1.4}px 40px rgba(0,0,0,.5),
+                        0 0 ${20+glow*60}px rgba(201,168,76,${glow}),
+                        inset 0 1px 0 rgba(201,168,76,.1)`;
+                });
+            });
+            card.addEventListener('mouseleave', () => {
+                cancelAnimationFrame(fid);
+                card.style.transition = 'transform .7s cubic-bezier(.34,1.56,.64,1), box-shadow .5s ease';
+                card.style.transform  = '';
+                card.style.boxShadow  = '';
+                setTimeout(() => card.style.transition = '', 800);
+            });
+        });
+    }
+
+    /* ── Magnetic buttons ── */
+    function addMagnetic() {
+        document.querySelectorAll('button').forEach(btn => {
+            if (btn._mag) return;
+            btn._mag = true;
+            let fid;
+            btn.addEventListener('mousemove', e => {
+                cancelAnimationFrame(fid);
+                fid = requestAnimationFrame(() => {
+                    const r  = btn.getBoundingClientRect();
+                    const dx = (e.clientX - (r.left + r.width  / 2)) * .25;
+                    const dy = (e.clientY - (r.top  + r.height / 2)) * .25;
+                    btn.style.transform = `translate(${dx}px, ${dy}px)`;
+                });
+            });
+            btn.addEventListener('mouseleave', () => {
+                cancelAnimationFrame(fid);
+                btn.style.transition = 'transform .7s cubic-bezier(.34,1.56,.64,1)';
+                btn.style.transform  = '';
+                setTimeout(() => btn.style.transition = '', 800);
+            });
+            btn.addEventListener('click', () => {
+                btn.style.transform = 'scale(.91)';
+                setTimeout(() => { btn.style.transform = ''; }, 160);
+            });
+        });
+    }
+
+    /* ── Number counters ── */
+    function addCounters() {
+        document.querySelectorAll('.metric-card h2,[data-testid="stMetricValue"]').forEach(el => {
+            if (el._cnt) return;
+            el._cnt = true;
+            const raw = el.textContent.replace(/[,% \t]/g, '').trim();
+            const num = parseFloat(raw);
+            if (isNaN(num) || num <= 0 || num > 1e9) return;
+            const hasPct = el.textContent.includes('%');
+            const isInt  = Number.isInteger(num) && !el.textContent.includes('.');
+            let start = null;
+            const dur = 1100;
+            function easeOut(t) { return 1 - Math.pow(1 - t, 4); }
+            function step(ts) {
+                if (!start) start = ts;
+                const p = Math.min((ts - start) / dur, 1);
+                const v = num * easeOut(p);
+                el.textContent = (isInt ? Math.round(v).toLocaleString() : v.toFixed(2)) + (hasPct ? '%' : '');
+                if (p < 1) requestAnimationFrame(step);
+                else el.textContent = (isInt ? num.toLocaleString() : num.toFixed(2)) + (hasPct ? '%' : '');
+            }
+            setTimeout(() => requestAnimationFrame(step), 300);
+        });
+    }
+
+    /* ── Tab ripple ── */
+    function addTabRipple() {
+        document.querySelectorAll('[data-baseweb="tab"]').forEach(tab => {
+            if (tab._rpl) return;
+            tab._rpl = true;
+            tab.addEventListener('click', e => {
+                const r    = document.createElement('span');
+                const rect = tab.getBoundingClientRect();
+                const size = Math.max(rect.width, rect.height);
+                r.style.cssText = `
+                    position:absolute; width:${size}px; height:${size}px;
+                    border-radius:50%; background:rgba(201,168,76,.18);
+                    left:${e.clientX - rect.left - size/2}px;
+                    top:${e.clientY - rect.top  - size/2}px;
+                    transform:scale(0); pointer-events:none;
+                    animation:_apexRpl .6s ease-out forwards;`;
+                tab.style.position = 'relative';
+                tab.style.overflow = 'hidden';
+                tab.appendChild(r);
+                setTimeout(() => r.remove(), 650);
+            });
+        });
+    }
+
+    /* ── Chart stagger ── */
+    function addChartStagger() {
+        document.querySelectorAll('.js-plotly-plot').forEach((el, i) => {
+            if (el._cs) return;
+            el._cs = true;
+            el.style.opacity   = '0';
+            el.style.transform = 'translateY(16px) scale(.985)';
+            el.style.transition = `opacity .8s ease ${i*.07}s, transform .8s cubic-bezier(.22,1,.36,1) ${i*.07}s`;
+            setTimeout(() => {
+                el.style.opacity   = '1';
+                el.style.transform = 'translateY(0) scale(1)';
+            }, 200 + i * 70);
+        });
+    }
+
+    /* ── Run all ── */
+    function runAll() {
+        addReveal();
+        addTilt();
+        addMagnetic();
+        addCounters();
+        addTabRipple();
+        addChartStagger();
+    }
+    runAll();
+
+    new MutationObserver(() => {
+        clearTimeout(window.__apexT);
+        window.__apexT = setTimeout(runAll, 380);
+    }).observe(document.body, { childList: true, subtree: true });
+
+})();
+</script>
+"""

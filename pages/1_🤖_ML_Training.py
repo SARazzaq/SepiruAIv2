@@ -153,6 +153,10 @@ if "ml_results" in st.session_state:
             from sklearn.preprocessing import LabelEncoder, StandardScaler
             import numpy as np
             X_new = pred_df.copy()
+            # Convert datetime to numeric
+            for col in X_new.columns:
+                if pd.api.types.is_datetime64_any_dtype(X_new[col]):
+                    X_new[col] = X_new[col].astype(np.int64) // 10**9
             for col in X_new.select_dtypes(include="object").columns:
                 le = LabelEncoder()
                 X_new[col] = le.fit_transform(X_new[col].astype(str))

@@ -1,6 +1,5 @@
 """
-Multi-provider AI client supporting Ollama, Groq, OpenAI, and Anthropic.
-Switch providers in .env by changing AI_PROVIDER.
+Multi-provider AI client: Groq (primary/free), Gemini, OpenAI, Anthropic, Ollama.
 """
 
 import os
@@ -13,7 +12,6 @@ load_dotenv()
 
 
 def _get_secret(key: str, fallback: str = "") -> str:
-    """Read from st.secrets (Streamlit Cloud) then os.environ (local)."""
     try:
         import streamlit as st
         val = st.secrets.get(key, "")
@@ -25,9 +23,7 @@ def _get_secret(key: str, fallback: str = "") -> str:
 
 
 class AIClient:
-    """Unified AI client that wraps multiple providers."""
-
-    PROVIDERS = ["ollama", "groq", "openai", "anthropic"]
+    PROVIDERS = ["groq", "gemini", "openai", "anthropic", "ollama", "vllm"]
 
     def __init__(self):
         self.provider = _get_secret("AI_PROVIDER", os.getenv("AI_PROVIDER", "groq")).lower()
@@ -45,6 +41,14 @@ class AIClient:
             except ImportError:
                 raise ImportError("Run: pip install groq")
 
+        elif self.provider == "gemini":
+            try:
+                import google.genai as genai
+                self._client = genai.Client(api_key=_get_secret("GEMINI_API_KEY"))
+                self.model = _get_secret("GEMINI_MODEL", "gemini-2.0-flash")
+            except ImportError:
+                raise ImportError("Run: pip install google-genai")
+
         elif self.provider == "openai":
             try:
                 from openai import OpenAI
@@ -61,44 +65,66 @@ class AIClient:
             except ImportError:
                 raise ImportError("Run: pip install anthropic")
 
-        else:  # ollama
+        elif self.provider == "vllm":
+            # vLLM exposes an OpenAI-compatible API — no extra library needed
+            try:
+                from openai import OpenAI as _OAI
+                vllm_host = os.getenv("VLLM_HOST", "http://localhost:8000")
+                self._client = _OAI(
+                    api_key="EMPTY",
+                    base_url=f"{vllm_host}/v1",
+                )
+                self.model = os.getenv("VLLM_MODEL", "mistralai/Mistral-7B-Instruct-v0.2")
+                self.base_url = vllm_host
+            except ImportError:
+                raise ImportError("Run: pip install openai")
+
+        else:
             self.provider = "ollama"
             self.base_url = os.getenv("OLLAMA_HOST", "http://localhost:11434")
             self.model = os.getenv("OLLAMA_MODEL", "llama3.1:8b")
 
-    # ── Connection helpers ────────────────────────────────────────────────────
-
     def check_connection(self) -> tuple[bool, str]:
-        """Returns (ok, message)."""
         try:
-            if self.provider == "ollama":
+            if self.provider == "groq":
+                self._client.models.list()
+                return True, f"Groq · {self.model}"
+
+            elif self.provider == "gemini":
+                r = self._client.generate_content("hi")
+                from src.quota_guard import increment
+                increment(1)
+                return True, f"Gemini · {self.model}"
+
+            elif self.provider == "vllm":
+                r = requests.get(f"{self.base_url}/v1/models", timeout=5)
+                if r.status_code == 200:
+                    models = [m["id"] for m in r.json().get("data", [])]
+                    return True, f"vLLM · {self.model} ({len(models)} model(s) loaded)"
+                return False, "vLLM server not reachable"
+
+            elif self.provider == "ollama":
                 r = requests.get(f"{self.base_url}/api/tags", timeout=5)
                 if r.status_code == 200:
                     models = [m["name"] for m in r.json().get("models", [])]
-                    return True, f"Connected · {len(models)} model(s) available"
-                return False, "Ollama responded with an error"
-
-            elif self.provider == "groq":
-                models = self._client.models.list()
-                return True, f"Groq connected · model: {self.model}"
+                    return True, f"Ollama · {len(models)} model(s)"
+                return False, "Ollama error"
 
             elif self.provider == "openai":
                 self._client.models.list()
-                return True, f"OpenAI connected · model: {self.model}"
+                return True, f"OpenAI · {self.model}"
 
             elif self.provider == "anthropic":
-                # Anthropic has no cheap list endpoint; do a tiny completion
                 self._client.messages.create(
                     model=self.model, max_tokens=5,
                     messages=[{"role": "user", "content": "hi"}]
                 )
-                return True, f"Anthropic connected · model: {self.model}"
+                return True, f"Anthropic · {self.model}"
 
         except Exception as e:
             return False, str(e)
 
     def get_available_models(self) -> list[str]:
-        """Return model list (Ollama only; others return current model)."""
         if self.provider == "ollama":
             try:
                 r = requests.get(f"{self.base_url}/api/tags", timeout=5)
@@ -109,35 +135,50 @@ class AIClient:
             return []
         return [self.model]
 
-    # ── Generation ────────────────────────────────────────────────────────────
-
     def generate(self, prompt: str, system: str = "") -> str:
-        """Single-shot generation. Returns text string."""
         try:
-            if self.provider == "ollama":
-                return self._ollama_generate(prompt, system)
-            elif self.provider == "groq":
+            if self.provider == "groq":
                 return self._openai_style_generate(self._client, prompt, system)
-            elif self.provider == "openai":
+            elif self.provider == "gemini":
+                return self._gemini_generate(prompt, system)
+            elif self.provider == "ollama":
+                return self._ollama_generate(prompt, system)
+            elif self.provider in ("openai", "vllm"):
                 return self._openai_style_generate(self._client, prompt, system)
             elif self.provider == "anthropic":
                 return self._anthropic_generate(prompt, system)
         except Exception as e:
-            return f"❌ Error from {self.provider}: {e}"
+            return f"❌ Error: {e}"
 
     def generate_stream(self, prompt: str, system: str = "") -> Generator[str, None, None]:
-        """Streaming generation. Yields text chunks."""
         try:
-            if self.provider == "ollama":
+            if self.provider == "groq":
+                yield from self._openai_style_stream(self._client, prompt, system)
+            elif self.provider == "gemini":
+                yield from self._gemini_stream(prompt, system)
+            elif self.provider == "ollama":
                 yield from self._ollama_stream(prompt, system)
-            elif self.provider in ("groq", "openai"):
+            elif self.provider in ("openai", "vllm"):
                 yield from self._openai_style_stream(self._client, prompt, system)
             elif self.provider == "anthropic":
                 yield from self._anthropic_stream(prompt, system)
         except Exception as e:
             yield f"❌ Streaming error: {e}"
 
-    # ── Provider internals ────────────────────────────────────────────────────
+    # ── Gemini ────────────────────────────────────────────────────────────────
+    def _gemini_generate(self, prompt: str, system: str) -> str:
+        from src.quota_guard import increment
+        full = f"{system}\n\n{prompt}" if system else prompt
+        r = self._client.models.generate_content(model=self.model, contents=full)
+        increment(1)
+        return r.text
+
+    def _gemini_stream(self, prompt: str, system: str) -> Generator[str, None, None]:
+        from src.quota_guard import increment
+        full = f"{system}\n\n{prompt}" if system else prompt
+        r = self._client.models.generate_content(model=self.model, contents=full)
+        increment(1)
+        yield r.text
 
     def _ollama_generate(self, prompt: str, system: str) -> str:
         payload = {
@@ -232,7 +273,7 @@ class AIClient:
                 prompt += "\nAssistant:"
                 yield from self._ollama_stream(prompt, system)
 
-            elif self.provider in ("groq", "openai"):
+            elif self.provider in ("groq", "openai", "vllm"):
                 msgs = []
                 if system:
                     msgs.append({"role": "system", "content": system})

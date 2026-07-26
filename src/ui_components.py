@@ -192,15 +192,30 @@ def toast(title: str, message: str, icon: str = "✦") -> str:
     </div>"""
 
 
-# ── CSS loader ────────────────────────────────────────────────────────────────
+# ── CSS + Motion loader ───────────────────────────────────────────────────────
 def load_all_styles(base_path: str = "assets"):
-    """Load all CSS files into Streamlit."""
+    """Load all CSS + inject cursor and animations on every page."""
+    import streamlit.components.v1 as components
+    from pathlib import Path
+
+    # Resolve absolute path — works from any working directory
+    # Try relative first, then look relative to this file's location
+    base = Path(base_path)
+    if not base.is_absolute():
+        # Try from cwd
+        if not base.exists():
+            # Fall back to path relative to this src/ file → ../assets
+            base = Path(__file__).parent.parent / base_path
+
     files = ["style.css", "components.css", "animations.css"]
     combined = ""
     for f in files:
+        fpath = base / f
         try:
-            with open(f"{base_path}/{f}", encoding="utf-8") as fh:
-                combined += fh.read() + "\n"
+            combined += fpath.read_text(encoding="utf-8") + "\n"
         except FileNotFoundError:
             pass
     st.markdown(f"<style>{combined}</style>", unsafe_allow_html=True)
+
+    from src.animations import apex_motion_engine
+    components.html(apex_motion_engine(), height=0, scrolling=False)

@@ -6,6 +6,7 @@ import plotly.graph_objects as go
 from src.animations import aurora_background, show_lottie, apex_motion_engine
 from src.ui_components import load_all_styles, typing_indicator, render_section, render_insight, render_metric_cards, upload_cta, status_pill
 from src.auth import require_auth
+from src.quota_guard import can_proceed, get_usage, reset_time_utc
 from src.smart_context import extract_relevant_context
 import streamlit as st
 import streamlit.components.v1 as components
@@ -20,7 +21,8 @@ from src.ai_client     import AIClient
 from src.data_analyzer import DataAnalyzer
 from src.data_cleaner  import DataCleaner
 from src.forecaster    import Forecaster
-from src.utils         import load_data, build_system_prompt, build_analysis_prompt
+from src.utils import (load_data, build_system_prompt, build_analysis_prompt, sanitise_user_input, sanitise_context, check_rate_limit)
+
 
 load_dotenv()
 
@@ -34,34 +36,85 @@ def _secret(key: str, fallback: str = "") -> str:
 
 # Seed env from secrets so AIClient picks them up via os.getenv
 for _k in ["AI_PROVIDER","GROQ_API_KEY","GROQ_MODEL",
+           "GEMINI_API_KEY","GEMINI_MODEL",
            "OPENAI_API_KEY","OPENAI_MODEL","ANTHROPIC_API_KEY","ANTHROPIC_MODEL"]:
     _v = _secret(_k)
     if _v:
         os.environ[_k] = _v
 
-# Default to groq on cloud (no OLLAMA_HOST available)
 if not os.environ.get("AI_PROVIDER"):
     os.environ["AI_PROVIDER"] = "groq"
 
 # ── Page config ───────────────────────────────────────────────────────────────
 st.set_page_config(
-    page_title="CSV AI Analyst",
-    page_icon="📊",
+    page_title="Sepiru AI",
+    page_icon="✦",
     layout="wide",
     initial_sidebar_state="expanded",
 )
-
-# ── Auth gate — must come right after set_page_config ────────────────────────
+# ── Auth gate ────────────────────────────────────────────────────────────────
 require_auth()
 
-# ── Load all styles ───────────────────────────────────────────────────────────
+# ── Quota maintenance gate ────────────────────────────────────────────────────
+if not can_proceed():
+    st.markdown("""
+    <style>
+    #MainMenu,footer,header,section[data-testid="stSidebar"]{display:none!important;}
+    .main .block-container{
+        min-height:100vh!important;display:flex!important;
+        flex-direction:column!important;align-items:center!important;
+        justify-content:center!important;text-align:center!important;
+    }
+    </style>
+    """, unsafe_allow_html=True)
+    st.markdown(f"""
+    <div style="max-width:500px;margin:auto;padding:3rem 2rem;
+         background:linear-gradient(145deg,#0c0c20,#080818);
+         border:1px solid rgba(201,168,76,.2);border-radius:24px;text-align:center;">
+        <div style="font-size:3rem;margin-bottom:1rem;">⚙️</div>
+        <h2 style="font-family:'Playfair Display',serif;color:#e8c96a;
+                   font-size:1.8rem;font-weight:400;font-style:italic;margin-bottom:.8rem;">
+            Under Maintenance
+        </h2>
+        <p style="color:#6a6a88;font-size:.9rem;line-height:1.7;margin-bottom:1.5rem;">
+            Daily AI quota has been reached to keep this service free.<br>
+            The app will automatically resume when quota resets.
+        </p>
+        <div style="background:rgba(201,168,76,.08);border:1px solid rgba(201,168,76,.2);
+             border-radius:12px;padding:1rem;margin-bottom:1rem;">
+            <div style="color:#4a4a6a;font-size:.6rem;letter-spacing:2px;
+                        text-transform:uppercase;margin-bottom:.3rem;">Resets in</div>
+            <div style="font-family:'Playfair Display',serif;color:#c9a84c;
+                        font-size:2rem;font-weight:400;">{reset_time_utc()}</div>
+        </div>
+        <p style="color:#3a3a52;font-size:.65rem;letter-spacing:1.5px;text-transform:uppercase;">
+            Powered by Groq Free Tier · 14,400 req/day
+        </p>
+    </div>
+    """, unsafe_allow_html=True)
+    st.stop()
+
+# ── Load all styles + motion engine ──────────────────────────────────────────
 load_all_styles("assets")
 
-# ── Particle background ───────────────────────────────────────────────────────
-#components.html(particle_background(), height=0)
-components.html(aurora_background(), height=1, scrolling=False)
-components.html(apex_motion_engine(), height=1, scrolling=False)
+# ── Lock sidebar open — hide all collapse/expand buttons ─────────────────────
+st.markdown("""
+<style>
+[data-testid="collapsedControl"],
+[data-testid="stSidebarCollapsedControl"],
+button[kind="header"],
+.st-emotion-cache-1egp75f,
+.st-emotion-cache-dvne4q,
+.st-emotion-cache-1rtdyuf,
+[aria-label="Close sidebar"],
+[aria-label="Open sidebar"],
+[aria-label="Collapse sidebar"] { display:none !important; visibility:hidden !important; }
+section[data-testid="stSidebar"] { min-width:280px !important; transform:translateX(0) !important; }
+</style>
+""", unsafe_allow_html=True)
 
+# ── Aurora background ─────────────────────────────────────────────────────────
+components.html(aurora_background(), height=1, scrolling=False)
 
 # ── Session state ─────────────────────────────────────────────────────────────
 DEFAULTS = {
@@ -77,8 +130,8 @@ for k, v in DEFAULTS.items():
 # ── Header ────────────────────────────────────────────────────────────────────
 st.markdown("""
 <div class='app-header'>
-    <h1>CSV <span>AI</span> Analyst</h1>
-    <p>Upload &nbsp;·&nbsp; Clean &nbsp;·&nbsp; Visualise &nbsp;·&nbsp; Chat &nbsp;·&nbsp; Forecast &nbsp;·&nbsp; Compare</p>
+    <h1>Sepiru <span>AI</span></h1>
+    <p>Your data has a story &nbsp;·&nbsp; We make it speak</p>
 </div>
 """, unsafe_allow_html=True)
 
@@ -86,7 +139,7 @@ st.markdown("""
 with st.sidebar:
     st.markdown("## ⚙️ Configuration")
 
-    # Provider fixed to groq — no dropdown needed
+    # Provider fixed to groq
     provider = "groq"
     os.environ["AI_PROVIDER"] = provider
 
@@ -110,16 +163,19 @@ with st.sidebar:
         if models:
             ai.model = st.selectbox("🤖 Model", models)
             st.session_state.selected_model = ai.model
-            chat_model = st.selectbox(
-                "💬 Chat Model",
-                models,
-                index=0,
-                help="Used only in the Chat tab"
-            )
+            chat_model = ai.model  # Chat tab uses Gemini directly
         else:
             chat_model = ai.model
     else:
         chat_model = None
+
+    st.markdown(
+        '<div class="status-pill" style="margin-top:.4rem;">'
+        '<span class="live-dot"></span>'
+        'Chat &nbsp;·&nbsp; Gemini 2.0 Flash'
+        '</div>',
+        unsafe_allow_html=True
+    )
 
     st.divider()
     st.markdown("### 🎛️ Generation Settings")
@@ -501,17 +557,29 @@ else:
             st.success("↩️ Reset to original.")
             st.rerun()
 
-    # ── TAB 4 — CHAT ──────────────────────────────────────────────────────────
+    # ── TAB 4 — CHAT (Gemini 2.0 Flash — Google Solution Challenge) ──────────
     with tab4:
         st.subheader("💬 Chat with Your Data")
 
-        if not st.session_state.ai_ready or ai is None:
-            st.error("AI not connected — check sidebar configuration.")
+        try:
+            import google.genai as genai_chat
+            from google.genai import types as genai_types
+            _gemini_key = _secret("GEMINI_API_KEY")
+            _gemini_ready = False
+            _gemini_model = None
+            if _gemini_key:
+                _gemini_client = genai_chat.Client(api_key=_gemini_key)
+                _gemini_ready = True
+        except Exception:
+            _gemini_ready = False
+            _gemini_client = None
+
+        if not _gemini_ready:
+            st.warning("Gemini API key not configured. Add GEMINI_API_KEY to Streamlit secrets.")
         else:
             c_l, c_r = st.columns([1, 6])
             with c_l:
                 show_lottie("robot", height=80)
-
             SYSTEM = (
                 "You are an expert data analyst. "
                 "Answer questions using ONLY the data context provided. "
@@ -524,45 +592,71 @@ else:
                     st.markdown(msg["content"])
 
             user_input = st.chat_input("Ask anything about your data…")
-
             if user_input:
-                with st.chat_message("user"):
-                    st.markdown(user_input)
-                st.session_state.chat_history.append(
-                    {"role": "user", "content": user_input}
-                )
+                allowed, rate_msg = check_rate_limit()
+                if not allowed:
+                    st.warning(f"⏳ {rate_msg}")
+                else:
+                    clean_input, flagged = sanitise_user_input(user_input)
+                    if flagged:
+                        st.warning("⚠️ Your message contained disallowed instructions and was cleaned.")
 
-                context = extract_relevant_context(df, user_input)
-                recent  = st.session_state.chat_history[-10:]
-                history = ""
-                for m in recent[:-1]:
-                    role = "User" if m["role"] == "user" else "Assistant"
-                    history += f"\n{role}: {m['content']}"
+                    with st.chat_message("user"):
+                        st.markdown(clean_input)
+                    st.session_state.chat_history.append(
+                        {"role": "user", "content": clean_input}
+                    )
 
-                full_prompt = f"""Here is the relevant data extracted from the dataset:
+                    context = extract_relevant_context(df, clean_input)
+                    context = sanitise_context(context)
 
+                    recent  = st.session_state.chat_history[-10:]
+                    history = ""
+                    for m in recent[:-1]:
+                        role = "User" if m["role"] == "user" else "Assistant"
+                        history += f"\n{role}: {m['content']}"
+
+                    full_prompt = f"""{SYSTEM}
+
+Here is the relevant data extracted from the dataset:
 {context}
 
 Conversation so far:{history}
 
-User: {user_input}
+User: {clean_input}
 
 Answer using the data above. Be specific with numbers and values."""
 
-                ai.model = chat_model
-                with st.chat_message("assistant"):
-                    st.markdown(typing_indicator(), unsafe_allow_html=True)
-                    placeholder   = st.empty()
-                    full_response = ""
-                    for chunk in ai.generate_stream(full_prompt, system=SYSTEM):
-                        full_response += chunk
-                        placeholder.markdown(full_response + "▌")
-                    placeholder.markdown(full_response)
+                    with st.chat_message("assistant"):
+                        st.markdown(typing_indicator(), unsafe_allow_html=True)
+                        placeholder   = st.empty()
+                        full_response = ""
+                        try:
+                            response = _gemini_client.models.generate_content(
+                                model="gemini-2.0-flash",
+                                contents=full_prompt,
+                            )
+                            full_response = response.text
+                        except Exception as gemini_err:
+                            err_str = str(gemini_err)
+                            if "429" in err_str or "RESOURCE_EXHAUSTED" in err_str or "quota" in err_str.lower():
+                                placeholder.markdown(
+                                    "⚠️ Gemini quota reached — switching to Groq…"
+                                )
+                                try:
+                                    for chunk in ai.generate_stream(full_prompt, system=SYSTEM):
+                                        full_response += chunk
+                                        placeholder.markdown(full_response + "▌")
+                                    full_response += "\n\n*— answered by Groq (Gemini quota reached)*"
+                                except Exception as groq_err:
+                                    full_response = f"❌ Both Gemini and Groq failed: {groq_err}"
+                            else:
+                                full_response = f"❌ Gemini error: {gemini_err}"
+                        placeholder.markdown(full_response)
 
-                st.session_state.chat_history.append(
-                    {"role": "assistant", "content": full_response}
-                )
-                ai.model = st.session_state.get("selected_model", ai.model)
+                    st.session_state.chat_history.append(
+                        {"role": "assistant", "content": full_response}
+                    )
 
             if st.session_state.chat_history:
                 if st.button("🗑️ Clear Chat"):
@@ -861,14 +955,22 @@ Are the metrics good? What should they watch out for?
                 )
 
                 if compare_input:
-                    with st.chat_message("user"):
-                        st.markdown(compare_input)
-                    st.session_state.compare_chat_history.append(
-                        {"role": "user", "content": compare_input}
-                    )
+                    allowed, rate_msg = check_rate_limit()
+                    if not allowed:
+                        st.warning(f"⏳ {rate_msg}")
+                    else:
+                        clean_compare, flagged = sanitise_user_input(compare_input)
+                        if flagged:
+                            st.warning("⚠️ Your message contained disallowed instructions and was cleaned.")
 
-                    context1 = extract_relevant_context(df,  compare_input)
-                    context2 = extract_relevant_context(df2, compare_input)
+                        with st.chat_message("user"):
+                            st.markdown(clean_compare)
+                        st.session_state.compare_chat_history.append(
+                            {"role": "user", "content": clean_compare}
+                        )
+                        context1 = sanitise_context(extract_relevant_context(df,  clean_compare))
+                        context2 = sanitise_context(extract_relevant_context(df2, clean_compare))
+
 
                     recent  = st.session_state.compare_chat_history[-10:]
                     history = ""
